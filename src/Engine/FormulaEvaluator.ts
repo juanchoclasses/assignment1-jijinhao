@@ -1,6 +1,7 @@
 import Cell from "./Cell"
 import SheetMemory from "./SheetMemory"
 import { ErrorMessages } from "./GlobalDefinitions";
+import e from "express";
 
 
 
@@ -19,66 +20,29 @@ export class FormulaEvaluator {
   }
 
   /**
-    * place holder for the evaluator.   I am not sure what the type of the formula is yet 
-    * I do know that there will be a list of tokens so i will return the length of the array
-    * 
-    * I also need to test the error display in the front end so i will set the error message to
-    * the error messages found In GlobalDefinitions.ts
-    * 
-    * according to this formula.
-    * 
-    7 tokens partial: "#ERR",
-    8 tokens divideByZero: "#DIV/0!",
-    9 tokens invalidCell: "#REF!",
-  10 tokens invalidFormula: "#ERR",
-  11 tokens invalidNumber: "#ERR",
-  12 tokens invalidOperator: "#ERR",
-  13 missingParentheses: "#ERR",
-  0 tokens emptyFormula: "#EMPTY!",
-
-                    When i get back from my quest to save the world from the evil thing i will fix.
-                      (if you are in a hurry you can fix it yourself)
-                               Sincerely 
-                               Bilbo
+    Now the evauluate fuction works; it takes a formula and returns a number.
     * 
    */
 
   evaluate(formula: FormulaType) {
-
-
-    // set the this._result to the length of the formula
-
-    this._result = formula.length;
+    this._lastResult = 0;
+    this._currentFormula = [...formula];
+    if(formula.length === 0) {
+      this._result = 0;
+      this._errorMessage = ErrorMessages.emptyFormula;
+      return;
+    }
+    this._errorOccured = false;
     this._errorMessage = "";
-
-    switch (formula.length) {
-      case 0:
-        this._errorMessage = ErrorMessages.emptyFormula;
-        break;
-      case 7:
-        this._errorMessage = ErrorMessages.partial;
-        break;
-      case 8:
-        this._errorMessage = ErrorMessages.divideByZero;
-        break;
-      case 9:
-        this._errorMessage = ErrorMessages.invalidCell;
-        break;
-      case 10:
+    this._result = this.plus();
+    if ( this._currentFormula.length > 0) {
+      if (!this._errorOccured) {
         this._errorMessage = ErrorMessages.invalidFormula;
-        break;
-      case 11:
-        this._errorMessage = ErrorMessages.invalidNumber;
-        break;
-      case 12:
-        this._errorMessage = ErrorMessages.invalidOperator;
-        break;
-      case 13:
-        this._errorMessage = ErrorMessages.missingParentheses;
-        break;
-      default:
-        this._errorMessage = "";
-        break;
+      }
+      this._errorOccured = true;
+    }
+    if (this._errorOccured) {
+      this._result = this._lastResult;
     }
   }
 
@@ -90,7 +54,118 @@ export class FormulaEvaluator {
     return this._result;
   }
 
+  //use this function to excutate + and - operators
+  private plus(): number {
+    if (this._errorOccured) {
+      return this._lastResult;
+    }
+    let result = this.multiply();
+    while ( this._currentFormula.length > 0 && this.operatorLevel() === 1) {
+      let operator = this._currentFormula.shift();
+      let num = this.multiply();
+      if (operator === "+") {
+        result += num;
+      } else if(operator === "-") {
+        result -= num;
+      }
+    }
+    this._lastResult = result;
+    return result;
+  }
 
+  //use this function to excutate * and / operators
+  private multiply(): number {
+    if (this._errorOccured) {
+      return this._lastResult;
+    }
+    let result = this.getNumber();
+    while ( this._currentFormula.length > 0 && this.operatorLevel() === 2) {
+      let operator = this._currentFormula.shift();
+      let num = this.getNumber();
+      if (operator === "*") {
+        result *= num;
+      } else if(operator === "/") {
+        if (num === 0) {
+          this._errorOccured = true;
+          this._errorMessage = ErrorMessages.divideByZero;
+          this._lastResult = Infinity;
+          return Infinity;
+        }
+        result /= num;
+      }
+    }
+    this._lastResult = result;
+    return result;
+  }
+
+    //use this function to get a number friom the formula
+  private getNumber(): number {
+    if (this._errorOccured) {
+      return this._lastResult;
+    }
+    if (this._currentFormula.length === 0) {
+      this._errorOccured = true;
+      this._errorMessage = ErrorMessages.partial;
+      return 0;
+    }
+
+    let token = this._currentFormula.shift();
+
+    if (this.isNumber(token)) {
+      this._lastResult = Number(token);
+      return Number(token);
+
+    } else if (this.isCellReference(token)) {
+      return this.dealCellReference(token);
+
+    } else if (token === "(") {
+      return this.dealParentheses();
+    } else {
+      this._errorOccured = true;
+      this._errorMessage = ErrorMessages.invalidFormula;
+      return 0;
+    }
+  }
+
+  private operatorLevel(): number {
+    if (this._currentFormula[0] === "+" || this._currentFormula[0] === "-") {
+      return 1;
+    } else if (
+      this._currentFormula[0] === "*" ||
+      this._currentFormula[0] === "/"
+    ) {
+      return 2;
+    }
+    return 0;
+  }
+  //use this function to deal with parentheses when getting numbers
+  private dealParentheses(): number {
+    if (this._errorOccured) {
+      return this._lastResult;
+    }
+    let result = this.plus();
+    if (this._currentFormula.length === 0 || this._currentFormula.shift() !== ")") {
+      this._errorOccured = true;
+      this._errorMessage = ErrorMessages.missingParentheses;
+      this._lastResult = result;
+      return result;
+    }
+    return result;
+  }
+  //use this function to deal with cell reference when getting numbers
+  private dealCellReference(token: TokenType): number {
+    if (this._errorOccured) {
+      return this._lastResult;
+    }
+    [this._lastResult, this._errorMessage] = this.getCellValue(token);
+
+    if (this._errorMessage !== "") {
+      this._errorOccured = true;
+    }
+    return this._lastResult;
+    
+  }
+  
 
 
   /**
